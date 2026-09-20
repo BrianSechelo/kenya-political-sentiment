@@ -1,5 +1,5 @@
 from fastapi import FastAPI
-from app.routers import politicians, politician_aliases
+from app.routers import politicians, politician_aliases, comments
 
 app = FastAPI(
     title="Kenya Political Sentiment API",
@@ -7,6 +7,7 @@ app = FastAPI(
 )
 app.include_router(politicians.router)
 app.include_router(politician_aliases.router)
+app.include_router(comments.router)
 
 
 @app.get("/")

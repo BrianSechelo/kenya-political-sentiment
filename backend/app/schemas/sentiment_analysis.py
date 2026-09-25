@@ -13,6 +13,11 @@ class SentimentAnalysisBase(BaseModel):
         ge=0.0,
         le=1.0,
     )
+    compound_score: float | None = Field(
+        default=None,
+        ge=-1.0,
+        le=1.0,
+    )
 
 
 class SentimentAnalysisCreate(SentimentAnalysisBase):

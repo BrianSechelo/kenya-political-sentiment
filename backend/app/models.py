@@ -270,6 +270,11 @@ class SentimentAnalysis(Base):
         nullable=True,
     )
 
+    compound_score = Column(
+    Numeric(5, 4),
+    nullable=True,
+    )
+
     analyzed_at = Column(
         DateTime,
         nullable=False,

@@ -1,20 +1,86 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import and_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import Comment, Mention, SentimentAnalysis
 from app.schemas.sentiment_analysis import (
+    SentimentAnalysisBatchResponse,
     SentimentAnalysisCreate,
     SentimentAnalysisResponse,
 )
-from app.services.sentiment_service import analyze_sentiment
+from app.services.sentiment_service import MODEL_VERSION, analyze_sentiment
 
 router = APIRouter(
     prefix="/sentiment-analyses",
     tags=["Sentiment Analyses"],
 )
 
+@router.post(
+    "/analyze-pending",
+    response_model=SentimentAnalysisBatchResponse,
+    status_code=status.HTTP_200_OK,
+)
+def analyze_pending_mentions(
+    limit: int = Query(default=100, ge=1, le=500),
+    db: Session = Depends(get_db),
+):
+    pending_mentions = (
+        db.query(Mention, Comment)
+        .join(Comment, Comment.comment_id == Mention.comment_id)
+        .outerjoin(
+            SentimentAnalysis,
+            and_(
+                SentimentAnalysis.mention_id == Mention.mention_id,
+                SentimentAnalysis.model_version == MODEL_VERSION,
+            ),
+        )
+        .filter(SentimentAnalysis.analysis_id.is_(None))
+        .order_by(Mention.mention_id)
+        .limit(limit)
+        .all()
+    )
+
+    new_analyses = []
+    skipped_count = 0
+
+    for mention, comment in pending_mentions:
+        try:
+            prediction = analyze_sentiment(comment.text)
+        except ValueError:
+            skipped_count += 1
+            continue
+
+        analysis = SentimentAnalysis(
+            mention_id=mention.mention_id,
+            model_version=prediction.model_version,
+            sentiment_label=prediction.sentiment_label,
+            confidence_score=prediction.confidence_score,
+            compound_score=prediction.compound_score,
+        )
+
+        db.add(analysis)
+        new_analyses.append(analysis)
+
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="One or more sentiment analyses already exist",
+        ) from exc
+
+    for analysis in new_analyses:
+        db.refresh(analysis)
+
+    return SentimentAnalysisBatchResponse(
+        model_version=MODEL_VERSION,
+        processed_count=len(new_analyses),
+        skipped_count=skipped_count,
+        analyses=new_analyses,
+    )
 
 @router.post(
     "/",

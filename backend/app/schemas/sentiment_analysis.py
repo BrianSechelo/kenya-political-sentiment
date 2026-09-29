@@ -29,3 +29,9 @@ class SentimentAnalysisResponse(SentimentAnalysisBase):
     analyzed_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+class SentimentAnalysisBatchResponse(BaseModel):
+    model_version: str
+    processed_count: int
+    skipped_count: int
+    analyses: list[SentimentAnalysisResponse]

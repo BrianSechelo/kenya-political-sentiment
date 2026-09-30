@@ -1,21 +1,96 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import and_
+from sqlalchemy import and_, case, func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import Comment, Mention, SentimentAnalysis
+from app.models import Comment, Mention, Politician, SentimentAnalysis
 from app.schemas.sentiment_analysis import (
+    PoliticianSentimentSummaryResponse,
     SentimentAnalysisBatchResponse,
     SentimentAnalysisCreate,
     SentimentAnalysisResponse,
-)
+    SentimentSummaryResponse,
+    )
 from app.services.sentiment_service import MODEL_VERSION, analyze_sentiment
 
 router = APIRouter(
     prefix="/sentiment-analyses",
     tags=["Sentiment Analyses"],
 )
+
+def get_summary_values(
+    db: Session,
+    model_version: str,
+    politician_id: int | None = None,
+) -> dict:
+    query = db.query(
+        func.count(SentimentAnalysis.analysis_id).label("total_analyses"),
+        func.coalesce(
+            func.sum(
+                case(
+                    (SentimentAnalysis.sentiment_label == "positive", 1),
+                    else_=0,
+                )
+            ),
+            0,
+        ).label("positive_count"),
+        func.coalesce(
+            func.sum(
+                case(
+                    (SentimentAnalysis.sentiment_label == "negative", 1),
+                    else_=0,
+                )
+            ),
+            0,
+        ).label("negative_count"),
+        func.coalesce(
+            func.sum(
+                case(
+                    (SentimentAnalysis.sentiment_label == "neutral", 1),
+                    else_=0,
+                )
+            ),
+            0,
+        ).label("neutral_count"),
+        func.avg(SentimentAnalysis.compound_score).label(
+            "average_compound_score"
+        ),
+    )
+
+    if politician_id is not None:
+        query = query.join(
+            Mention,
+            Mention.mention_id == SentimentAnalysis.mention_id,
+        ).filter(Mention.politician_id == politician_id)
+
+    result = query.filter(
+        SentimentAnalysis.model_version == model_version
+    ).one()
+
+    total = int(result.total_analyses or 0)
+    positive = int(result.positive_count or 0)
+    negative = int(result.negative_count or 0)
+    neutral = int(result.neutral_count or 0)
+
+    def percentage(count: int) -> float:
+        return round((count / total) * 100, 2) if total else 0.0
+
+    return {
+        "model_version": model_version,
+        "total_analyses": total,
+        "positive_count": positive,
+        "negative_count": negative,
+        "neutral_count": neutral,
+        "positive_percentage": percentage(positive),
+        "negative_percentage": percentage(negative),
+        "neutral_percentage": percentage(neutral),
+        "average_compound_score": (
+            round(float(result.average_compound_score), 4)
+            if result.average_compound_score is not None
+            else None
+        ),
+    }
 
 @router.post(
     "/analyze-pending",
@@ -209,3 +284,46 @@ def analyze_mention(
         ) from exc
 
     return new_analysis
+
+@router.get(
+    "/summary",
+    response_model=SentimentSummaryResponse,
+)
+def get_sentiment_summary(
+    model_version: str = Query(default=MODEL_VERSION, min_length=1),
+    db: Session = Depends(get_db),
+):
+    return get_summary_values(db, model_version)
+
+@router.get(
+    "/summary/politicians/{politician_id}",
+    response_model=PoliticianSentimentSummaryResponse,
+)
+def get_politician_sentiment_summary(
+    politician_id: int,
+    model_version: str = Query(default=MODEL_VERSION, min_length=1),
+    db: Session = Depends(get_db),
+):
+    politician = (
+        db.query(Politician)
+        .filter(Politician.politician_id == politician_id)
+        .first()
+    )
+
+    if politician is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Politician not found",
+        )
+
+    summary = get_summary_values(
+        db=db,
+        model_version=model_version,
+        politician_id=politician_id,
+    )
+
+    return PoliticianSentimentSummaryResponse(
+        politician_id=politician.politician_id,
+        full_name=politician.full_name,
+        **summary,
+    )

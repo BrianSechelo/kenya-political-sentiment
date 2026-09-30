@@ -35,3 +35,19 @@ class SentimentAnalysisBatchResponse(BaseModel):
     processed_count: int
     skipped_count: int
     analyses: list[SentimentAnalysisResponse]
+
+class SentimentSummaryResponse(BaseModel):
+    model_version: str
+    total_analyses: int
+    positive_count: int
+    negative_count: int
+    neutral_count: int
+    positive_percentage: float
+    negative_percentage: float
+    neutral_percentage: float
+    average_compound_score: float | None
+
+
+class PoliticianSentimentSummaryResponse(SentimentSummaryResponse):
+    politician_id: int
+    full_name: str

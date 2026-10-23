@@ -1,5 +1,5 @@
 from fastapi import FastAPI
-from app.routers import politicians, politician_aliases, comments, mentions, sentiment_analyses
+from app.routers import politicians, politician_aliases, comments, mentions, sentiment_analyses, youtube
 
 app = FastAPI(
     title="Kenya Political Sentiment API",
@@ -10,6 +10,7 @@ app.include_router(politician_aliases.router)
 app.include_router(comments.router)
 app.include_router(mentions.router)
 app.include_router(sentiment_analyses.router)
+app.include_router(youtube.router)
 
 @app.get("/")
 def root():

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 
@@ -9,7 +9,6 @@ from app.schemas.politician import (
     PoliticianUpdate,
     PoliticianResponse,
 )
-from fastapi import APIRouter, Depends, HTTPException, status
 
 
 router = APIRouter(
@@ -111,8 +110,7 @@ def create_politician(
         db.refresh(new_politician)
     except IntegrityError:
         db.rollback()
-
-    raise HTTPException(
+        raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="A politician with this slug already exists",
         )

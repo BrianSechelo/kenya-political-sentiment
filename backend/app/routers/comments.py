@@ -1,14 +1,64 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import Comment, Source
-from app.schemas.comment import CommentCreate, CommentResponse
+from app.schemas.comment import (
+    CommentCreate,
+    CommentListResponse,
+    CommentResponse,
+    CommentReviewResponse,
+)
+from app.services.comment_review import build_comment_reviews, list_comment_reviews
 from app.services.mention_detection import create_mentions_for_comment
 
 
 router = APIRouter(prefix="/comments", tags=["Comments"])
+
+@router.get(
+    "/",
+    response_model=CommentListResponse,
+    summary="Review collected comments and stored sentiment results",
+    description=(
+        "Filter saved comments by source, politician, or mention presence. "
+        "Returns each comment once, newest collected first, with its source, "
+        "all politician mentions, and all stored model predictions. "
+        "A politician filter selects comments without hiding their other mentions. "
+        "Empty analyses means that mention has no stored prediction. "
+        "VADER predictions score the whole comment, not sentiment specifically "
+        "toward each mentioned politician. "
+        "This endpoint does not collect data or run sentiment analysis."
+    ),
+)
+def list_comments(
+    source_id: int | None = Query(default=None, gt=0),
+    politician_id: int | None = Query(default=None, gt=0),
+    has_mentions: bool | None = Query(default=None),
+    skip: int = Query(default=0, ge=0),
+    limit: int = Query(default=50, ge=1, le=100),
+    db: Session = Depends(get_db),
+):
+    return list_comment_reviews(
+        db, source_id=source_id, politician_id=politician_id,
+        has_mentions=has_mentions, skip=skip, limit=limit,
+    )
+
+
+@router.get(
+    "/{comment_id}",
+    response_model=CommentReviewResponse,
+    summary="Review one collected comment",
+    responses={404: {"description": "Comment not found"}},
+)
+def get_comment(
+    comment_id: int = Path(gt=0),
+    db: Session = Depends(get_db),
+):
+    comment = db.get(Comment, comment_id)
+    if comment is None:
+        raise HTTPException(status_code=404, detail="Comment not found")
+    return build_comment_reviews(db, [comment])[0]
 
 
 @router.post(
